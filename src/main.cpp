@@ -4,30 +4,41 @@
 //    pendant N ticks et rejoue des que le clic devient possible (sol ou orbe).
 // 2) Repetition : si "repeat-held" est actif et que tu maintiens le clic, il est
 //    re-declenche a chaque nouvelle occasion (atterrissage, nouvel orbe).
-// 3) Console live : une fenetre Windows qui affiche chaque evenement.
+// 3) Console live : une fenetre Windows qui affiche chaque evenement. Les memes
+//    lignes sont aussi ecrites dans le journal Geode (geode/logs).
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayerObject.hpp>
 #include <Windows.h>
 #include <cstdarg>
 #include <cstdio>
+#include <string>
 
 using namespace geode::prelude;
 
 namespace mirb {
-    static bool g_console = false;
+    static HANDLE g_out = INVALID_HANDLE_VALUE;   // sortie console (CONOUT$)
     static unsigned long long g_tick = 0;
 
     static void say(char const* fmt, ...) {
-        if (!g_console) return;
-        auto* pl = PlayLayer::get();
-        float pct = pl ? pl->getCurrentPercent() : 0.f;
-        std::printf("[MIRB] tick %-8llu %5.1f%%  ", g_tick, pct);
+        char msg[400];
         va_list args;
         va_start(args, fmt);
-        std::vprintf(fmt, args);
+        std::vsnprintf(msg, sizeof(msg), fmt, args);
         va_end(args);
-        std::printf("\n");
-        std::fflush(stdout);
+
+        auto* pl = PlayLayer::get();
+        float pct = pl ? pl->getCurrentPercent() : 0.f;
+        char line[512];
+        std::snprintf(line, sizeof(line), "[MIRB] tick %-8llu %5.1f%%  %s", g_tick, pct, msg);
+
+        // Toujours dans le journal Geode, meme si la fenetre console n'existe pas.
+        log::info("{}", line);
+
+        if (g_out != INVALID_HANDLE_VALUE) {
+            std::string out = std::string(line) + "\r\n";
+            DWORD written = 0;
+            WriteConsoleA(g_out, out.c_str(), static_cast<DWORD>(out.size()), &written, nullptr);
+        }
     }
 
     static bool enabled() { return Mod::get()->getSettingValue<bool>("enabled"); }
@@ -37,19 +48,35 @@ namespace mirb {
 
 $on_mod(Loaded) {
     if (!Mod::get()->getSettingValue<bool>("console")) return;
-    if (AllocConsole()) {
-        FILE* f = nullptr;
-        freopen_s(&f, "CONOUT$", "w", stdout);
-        SetConsoleTitleA("Predictive Input Buffer - Live Console");
-        // Fermer cette fenetre fermerait le jeu : on grise le bouton X.
-        if (HWND hwnd = GetConsoleWindow()) {
-            if (HMENU menu = GetSystemMenu(hwnd, FALSE)) {
-                EnableMenuItem(menu, SC_CLOSE, MF_BYCOMMAND | MF_GRAYED);
-            }
-        }
-        mirb::g_console = true;
-        mirb::say("console ready (window=%d ticks, repeat=%d)", mirb::windowTicks(), mirb::repeatHeld() ? 1 : 0);
+
+    // On n'utilise pas freopen sur stdout : Geode lit stdout par un tuyau et
+    // le casserait. On ecrit directement dans la console avec WriteConsole.
+    BOOL allocated = AllocConsole();
+    DWORD err = allocated ? 0 : GetLastError();
+
+    HANDLE h = CreateFileA("CONOUT$", GENERIC_READ | GENERIC_WRITE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        log::warn("Predictive Input Buffer: could not open a console (AllocConsole={}, error={})",
+                  allocated ? 1 : 0, static_cast<unsigned long>(err));
+        return;
     }
+    mirb::g_out = h;
+
+    if (allocated) SetConsoleTitleA("Predictive Input Buffer - Live Console");
+
+    if (HWND hwnd = GetConsoleWindow()) {
+        // Fermer cette fenetre fermerait le jeu : on grise le bouton X.
+        if (HMENU menu = GetSystemMenu(hwnd, FALSE)) {
+            EnableMenuItem(menu, SC_CLOSE, MF_BYCOMMAND | MF_GRAYED);
+        }
+        // Au premier plan pour ne pas rester cachee derriere le jeu.
+        SetWindowPos(hwnd, HWND_TOPMOST, 40, 40, 900, 420, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    }
+
+    mirb::say("console ready (AllocConsole=%d err=%lu, window=%d ticks, repeat=%d)",
+              allocated ? 1 : 0, static_cast<unsigned long>(err),
+              mirb::windowTicks(), mirb::repeatHeld() ? 1 : 0);
 }
 
 class $modify(MirbPlayer, PlayerObject) {
