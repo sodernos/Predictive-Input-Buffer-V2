@@ -4,11 +4,12 @@
 //    pendant N ticks et rejoue des que le clic devient possible (sol ou orbe).
 // 2) Repetition : si "repeat-held" est actif et que tu maintiens le clic, il est
 //    re-declenche a chaque nouvelle occasion (atterrissage, nouvel orbe).
-// 3) Console live : une fenetre Windows qui affiche chaque evenement. Les memes
-//    lignes sont aussi ecrites dans le journal Geode (geode/logs).
+// 3) Console live : n'affiche que les changements de fenetre et les SAVED.
+//    Tous les evenements sont aussi dans le journal Geode (geode/logs).
 // 4) Touche (F4 par defaut, reglable) : fait defiler la fenetre 1, 2, 4, 8, 16, OFF.
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayerObject.hpp>
+#include <Geode/modify/PlayLayer.hpp>
 #include <Windows.h>
 #include <cstdarg>
 #include <cstdio>
@@ -20,12 +21,9 @@ namespace mirb {
     static HANDLE g_out = INVALID_HANDLE_VALUE;   // sortie console (CONOUT$)
     static unsigned long long g_tick = 0;
 
-    static void say(char const* fmt, ...) {
+    static void emit(bool toConsole, char const* fmt, va_list args) {
         char msg[400];
-        va_list args;
-        va_start(args, fmt);
         std::vsnprintf(msg, sizeof(msg), fmt, args);
-        va_end(args);
 
         auto* pl = PlayLayer::get();
         float pct = pl ? pl->getCurrentPercent() : 0.f;
@@ -35,11 +33,27 @@ namespace mirb {
         // Toujours dans le journal Geode, meme si la fenetre console n'existe pas.
         log::info("{}", line);
 
-        if (g_out != INVALID_HANDLE_VALUE) {
+        if (toConsole && g_out != INVALID_HANDLE_VALUE) {
             std::string out = std::string(line) + "\r\n";
             DWORD written = 0;
             WriteConsoleA(g_out, out.c_str(), static_cast<DWORD>(out.size()), &written, nullptr);
         }
+    }
+
+    // Affiche dans la console ET le journal : changement de fenetre, SAVED.
+    static void say(char const* fmt, ...) {
+        va_list args;
+        va_start(args, fmt);
+        emit(true, fmt, args);
+        va_end(args);
+    }
+
+    // Journal Geode seulement (la console reste propre).
+    static void note(char const* fmt, ...) {
+        va_list args;
+        va_start(args, fmt);
+        emit(false, fmt, args);
+        va_end(args);
     }
 
     static bool enabled() { return Mod::get()->getSettingValue<bool>("enabled"); }
@@ -102,7 +116,7 @@ $on_mod(Loaded) {
         SetWindowPos(hwnd, HWND_TOPMOST, 40, 40, 900, 420, SWP_SHOWWINDOW | SWP_NOACTIVATE);
     }
 
-    mirb::say("console ready (AllocConsole=%d err=%lu, window=%d ticks, repeat=%d)",
+    mirb::note("console ready (AllocConsole=%d err=%lu, window=%d ticks, repeat=%d)",
               allocated ? 1 : 0, static_cast<unsigned long>(err),
               mirb::windowTicks(), mirb::repeatHeld() ? 1 : 0);
 }
@@ -141,7 +155,7 @@ class $modify(MirbPlayer, PlayerObject) {
                 m_fields->pending = true;
                 m_fields->ticksLeft = mirb::windowTicks();
                 m_fields->waited = 0;
-                mirb::say("BUFFERED  early click, window = %d ticks", m_fields->ticksLeft);
+                mirb::note("BUFFERED  early click, window = %d ticks", m_fields->ticksLeft);
             }
         }
         return PlayerObject::pushButton(btn);
@@ -156,7 +170,7 @@ class $modify(MirbPlayer, PlayerObject) {
         m_fields->wasCan = false;
         m_fields->ticksLeft = 0;
         m_fields->waited = 0;
-        mirb::say("RESET     new attempt, held state cleared");
+        mirb::note("RESET     new attempt, held state cleared");
     }
 
     bool releaseButton(PlayerButton btn) {
@@ -164,7 +178,7 @@ class $modify(MirbPlayer, PlayerObject) {
             m_fields->held = false;
             if (m_fields->pending) {
                 m_fields->pending = false;
-                mirb::say("CANCELLED released before the chance came");
+                mirb::note("CANCELLED released before the chance came");
             }
         }
         return PlayerObject::releaseButton(btn);
@@ -189,11 +203,11 @@ class $modify(MirbPlayer, PlayerObject) {
             m_fields->waited++;
             if (can) {
                 PlayerObject::pushButton(PlayerButton::Jump);
-                mirb::say("FIRED     buffered click after %d ticks", m_fields->waited);
+                mirb::say("SAVED     click delayed by %d tick(s) (%.2f frame @60fps)", m_fields->waited, m_fields->waited / 4.0);
                 m_fields->pending = false;
                 fired = true;
             } else if (--m_fields->ticksLeft <= 0) {
-                mirb::say("EXPIRED   no chance within the window");
+                mirb::note("EXPIRED   no chance within the window");
                 m_fields->pending = false;
             }
         }
@@ -202,9 +216,21 @@ class $modify(MirbPlayer, PlayerObject) {
         if (!fired && can && !m_fields->wasCan && m_fields->held && mirb::repeatHeld()) {
             PlayerObject::releaseButton(PlayerButton::Jump);
             PlayerObject::pushButton(PlayerButton::Jump);
-            mirb::say("REPEAT    held click re-fired on a new chance");
+            mirb::note("REPEAT    held click re-fired on a new chance");
         }
 
         m_fields->wasCan = can;
+    }
+};
+
+// Mort / restart / checkpoint : le jeu garde l'etat "bouton maintenu" du joueur
+// et le fait sauter tout seul apres la reapparition. On relache le clic des
+// deux joueurs a chaque nouvelle tentative.
+class $modify(MirbPlayLayer, PlayLayer) {
+    void resetLevel() {
+        PlayLayer::resetLevel();
+        if (m_player1) m_player1->releaseButton(PlayerButton::Jump);
+        if (m_player2) m_player2->releaseButton(PlayerButton::Jump);
+        mirb::note("RESET     new attempt, jump released on both players");
     }
 };
