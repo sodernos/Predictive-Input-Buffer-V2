@@ -3,7 +3,7 @@
 	"gd": { "win": "2.2081" },
 	"version": "v0.1.0",
 	"id": "sodernos.monster-repeat-buffer",
-	"name": "Monster Input Repetitive Buffer",
+	"name": "Predictive Input Buffer",
 	"developer": "sodernos",
 	"description": "Input buffer with repeat-on-hold and a live console.",
 	"settings": {
