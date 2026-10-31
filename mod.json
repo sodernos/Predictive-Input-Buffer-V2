@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.2.0",
+	"version": "v1.3.0",
 	"id": "sodernos.monster-repeat-buffer",
 	"name": "Predictive Input Buffer",
 	"developer": "sodernos",
@@ -36,6 +36,14 @@
 			"description": "In a level, cycles the max delay: 1, 2, 4, 8, 16 ticks, CUSTOM, then OFF, then back to 1.",
 			"default": "F4",
 			"category": "gameplay"
+		},
+		"cps-limit": {
+			"type": "int",
+			"name": "Pause buffer at CPS (0 = never)",
+			"description": "When you click this many times per second or more, the buffer turns off (clicks go straight to the game) until you slow down. 0 = never pause.",
+			"default": 0,
+			"min": 0,
+			"max": 60
 		},
 		"repeat-held": {
 			"type": "bool",
