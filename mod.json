@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.1.0",
+	"version": "v1.2.0",
 	"id": "sodernos.monster-repeat-buffer",
 	"name": "Predictive Input Buffer",
 	"developer": "sodernos",
@@ -17,15 +17,23 @@
 		"window-ticks": {
 			"type": "int",
 			"name": "Max delay (ticks)",
-			"description": "Max delay the buffer may add to a click. 240 ticks per second: 4 ticks = 1 frame at 60 FPS. F4 cycles 1, 2, 4, 8, 16, OFF.",
+			"description": "Max delay F4 is currently on. 240 ticks per second: 1 tick = 4.2 ms. F4 cycles 1, 2, 4, 8, 16, CUSTOM, OFF.",
 			"default": 8,
+			"min": 1,
+			"max": 64
+		},
+		"custom-ticks": {
+			"type": "int",
+			"name": "Custom max delay (ticks)",
+			"description": "Max delay used by the CUSTOM step of F4 (after 16). 1 tick = 4.2 ms.",
+			"default": 24,
 			"min": 1,
 			"max": 64
 		},
 		"cycle-key": {
 			"type": "keybind",
 			"name": "Key: cycle window",
-			"description": "In a level, cycles the buffer window: 1, 2, 4, 8, 16 ticks, then OFF, then back to 1.",
+			"description": "In a level, cycles the max delay: 1, 2, 4, 8, 16 ticks, CUSTOM, then OFF, then back to 1.",
 			"default": "F4",
 			"category": "gameplay"
 		},
