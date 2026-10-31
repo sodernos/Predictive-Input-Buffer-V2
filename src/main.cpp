@@ -1,4 +1,4 @@
-// Monster Input Repetitive Buffer - implementation originale pour Geode (GD 2.2081).
+// Predictive Input Buffer (sodernos) - implementation originale pour Geode (GD 2.2081).
 //
 // 1) Buffer : un clic fait trop tot (rien a cliquer pour l'instant) est memorise
 //    pendant N ticks et rejoue des que le clic devient possible (sol ou orbe).
@@ -40,7 +40,7 @@ $on_mod(Loaded) {
     if (AllocConsole()) {
         FILE* f = nullptr;
         freopen_s(&f, "CONOUT$", "w", stdout);
-        SetConsoleTitleA("Monster Input Repetitive Buffer - Live Console");
+        SetConsoleTitleA("Predictive Input Buffer - Live Console");
         // Fermer cette fenetre fermerait le jeu : on grise le bouton X.
         if (HWND hwnd = GetConsoleWindow()) {
             if (HMENU menu = GetSystemMenu(hwnd, FALSE)) {
