@@ -6,6 +6,7 @@
 //    re-declenche a chaque nouvelle occasion (atterrissage, nouvel orbe).
 // 3) Console live : une fenetre Windows qui affiche chaque evenement. Les memes
 //    lignes sont aussi ecrites dans le journal Geode (geode/logs).
+// 4) Touche (F4 par defaut, reglable) : fait defiler la fenetre 1, 2, 4, 8, 16, OFF.
 #include <Geode/Geode.hpp>
 #include <Geode/modify/PlayerObject.hpp>
 #include <Windows.h>
@@ -44,6 +45,33 @@ namespace mirb {
     static bool enabled() { return Mod::get()->getSettingValue<bool>("enabled"); }
     static bool repeatHeld() { return Mod::get()->getSettingValue<bool>("repeat-held"); }
     static int windowTicks() { return static_cast<int>(Mod::get()->getSettingValue<int64_t>("window-ticks")); }
+
+    // OFF -> 1 -> 2 -> 4 -> 8 -> 16 -> OFF -> ...
+    static void cycleWindow() {
+        static int const steps[] = {1, 2, 4, 8, 16};
+        auto* mod = Mod::get();
+
+        if (!enabled()) {
+            mod->setSettingValue<bool>("enabled", true);
+            mod->setSettingValue<int64_t>("window-ticks", steps[0]);
+            say("WINDOW    -> %d tick(s) (%.2f frame @60fps)", steps[0], steps[0] / 4.0);
+            return;
+        }
+
+        int cur = windowTicks();
+        int next = -1;
+        for (int s : steps) {
+            if (s > cur) { next = s; break; }
+        }
+
+        if (next < 0) {
+            mod->setSettingValue<bool>("enabled", false);
+            say("WINDOW    -> OFF (no buffering, no repeat)");
+        } else {
+            mod->setSettingValue<int64_t>("window-ticks", next);
+            say("WINDOW    -> %d ticks (%.2f frames @60fps)", next, next / 4.0);
+        }
+    }
 }
 
 $on_mod(Loaded) {
@@ -77,6 +105,13 @@ $on_mod(Loaded) {
     mirb::say("console ready (AllocConsole=%d err=%lu, window=%d ticks, repeat=%d)",
               allocated ? 1 : 0, static_cast<unsigned long>(err),
               mirb::windowTicks(), mirb::repeatHeld() ? 1 : 0);
+}
+
+// Touche de defilement de la fenetre (reglage "cycle-key", F4 par defaut).
+$execute {
+    listenForKeybindSettingPresses("cycle-key", [](Keybind const&, bool down, bool repeat, double) {
+        if (down && !repeat) mirb::cycleWindow();
+    });
 }
 
 class $modify(MirbPlayer, PlayerObject) {
