@@ -1,7 +1,7 @@
 {
 	"geode": "5.11.2",
 	"gd": { "win": "2.2081" },
-	"version": "v0.2.0",
+	"version": "v0.3.0",
 	"id": "sodernos.monster-repeat-buffer",
 	"name": "Predictive Input Buffer",
 	"developer": "sodernos",
