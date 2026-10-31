@@ -170,7 +170,7 @@ namespace {
         if (!buf.enabled) {
             return "OFF (no buffering)";
         }
-        return fmt::format("{} tick{} ({:g} frame @60fps)", buf.window, buf.window > 1 ? "s" : "", buf.window * TICK);
+        return fmt::format("{} tick{} ({:.1f} ms)", buf.window, buf.window > 1 ? "s" : "", buf.window * 1000.0 / 240.0);
     }
 
     // ------------------------------------------------------------------ ghost
@@ -592,8 +592,8 @@ namespace {
             return false;
         }
 
-        say("SAVED     {} delayed by {} tick{} ({:g} frame @60fps)", down ? "click" : "release", saved, saved > 1 ? "s" : "",
-            saved * TICK);
+        say("SAVED     {} delayed by {} tick{} ({:.1f} ms)", down ? "click" : "release", saved, saved > 1 ? "s" : "",
+            saved * 1000.0 / 240.0);
         buf.shift = saved;
         queueInput(saved, down);
         return true;
@@ -760,8 +760,27 @@ $on_mod(Loaded) {
     }
 
     consoleLine("=== Predictive Input Buffer - Mod made by Sodernos ===");
+    consoleLine("");
+    consoleLine("HOW IT WORKS");
+    consoleLine("  Every click, an invisible ghost player tests your click ahead of time.");
+    consoleLine("  If that click would kill you but a slightly later click survives,");
+    consoleLine("  your click is delayed: the console shows SAVED + how many ticks.");
+    consoleLine("  A click on time shows nothing (nothing to save).");
+    consoleLine("");
+    consoleLine("KEYS AND SETTINGS");
+    consoleLine("  F4: max delay 1 -> 2 -> 4 -> 8 -> 16 ticks -> OFF -> 1 ...");
+    consoleLine("  Key, orbs, console: Geode > Mods > Predictive Input Buffer > settings.");
+    consoleLine("  Hold the click: every new orb you touch gets clicked.");
+    consoleLine("  After a death, the click is always released.");
+    consoleLine("");
+    consoleLine("TICKS");
+    consoleLine("  1 tick = 1/240 s = 4.2 ms (1 frame at 240 fps, 1/4 frame at 60 fps).");
+    consoleLine("  Your fps doesn't change it: GD physics runs at 240 ticks per second.");
+    consoleLine("");
+    consoleLine(fmt::format("Current max delay: {}", windowText()));
+    consoleLine("------------------------------------------------------------------");
     log::info("Mod made by Sodernos");
-    note("loaded v1.0.0, window {}", windowText());
+    note("loaded v1.1.0, window {}", windowText());
 }
 
 // Window key (setting "cycle-key", F4 by default).
