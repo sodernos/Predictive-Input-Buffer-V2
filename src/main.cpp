@@ -13,6 +13,7 @@
 #include <Windows.h>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 using namespace geode::prelude;
@@ -116,6 +117,12 @@ $on_mod(Loaded) {
         SetWindowPos(hwnd, HWND_TOPMOST, 40, 40, 900, 420, SWP_SHOWWINDOW | SWP_NOACTIVATE);
     }
 
+    {
+        char const* header = "=== Predictive Input Buffer - Mod made by Sodernos ===\r\n";
+        DWORD written = 0;
+        WriteConsoleA(h, header, static_cast<DWORD>(std::strlen(header)), &written, nullptr);
+        log::info("Mod made by Sodernos");
+    }
     mirb::note("console ready (AllocConsole=%d err=%lu, window=%d ticks, repeat=%d)",
               allocated ? 1 : 0, static_cast<unsigned long>(err),
               mirb::windowTicks(), mirb::repeatHeld() ? 1 : 0);
@@ -130,9 +137,10 @@ $execute {
 
 class $modify(MirbPlayer, PlayerObject) {
     struct Fields {
-        bool pending = false;   // un clic precoce attend son occasion
-        bool held = false;      // le bouton est maintenu
-        bool wasCan = false;    // un clic etait possible au tick precedent
+        bool pending = false;      // un clic trop tot attend son occasion
+        bool held = false;         // le bouton est maintenu
+        bool wasCan = false;       // un clic etait possible au tick precedent
+        bool releaseNext = false;  // relacher le clic rejoue au tick suivant (tap)
         int ticksLeft = 0;
         int waited = 0;
     };
@@ -148,10 +156,21 @@ class $modify(MirbPlayer, PlayerObject) {
         return m_touchingRings && m_touchingRings->count() > 0;
     }
 
+    void clearState() {
+        m_fields->pending = false;
+        m_fields->held = false;
+        m_fields->wasCan = false;
+        m_fields->releaseNext = false;
+        m_fields->ticksLeft = 0;
+        m_fields->waited = 0;
+    }
+
     bool pushButton(PlayerButton btn) {
         if (btn == PlayerButton::Jump && mirb::enabled() && this->modeIsBuffered()) {
+            // Seul un VRAI nouvel appui compte (pas un appui repete alors qu'on tient deja).
+            bool newPress = !m_fields->held;
             m_fields->held = true;
-            if (!this->canClickNow()) {
+            if (newPress && !this->canClickNow()) {
                 m_fields->pending = true;
                 m_fields->ticksLeft = mirb::windowTicks();
                 m_fields->waited = 0;
@@ -161,26 +180,14 @@ class $modify(MirbPlayer, PlayerObject) {
         return PlayerObject::pushButton(btn);
     }
 
-    // Nouvelle tentative (mort, restart, checkpoint) : on oublie tout etat de maintien,
-    // sinon le mod continuerait a "tenir" le clic a ta place jusqu'a ton prochain clic.
     void resetObject() {
         PlayerObject::resetObject();
-        m_fields->pending = false;
-        m_fields->held = false;
-        m_fields->wasCan = false;
-        m_fields->ticksLeft = 0;
-        m_fields->waited = 0;
-        mirb::note("RESET     new attempt, held state cleared");
+        this->clearState();
     }
 
+    // Relacher NE supprime PAS le clic en attente : un tap trop tot sera rejoue.
     bool releaseButton(PlayerButton btn) {
-        if (btn == PlayerButton::Jump) {
-            m_fields->held = false;
-            if (m_fields->pending) {
-                m_fields->pending = false;
-                mirb::note("CANCELLED released before the chance came");
-            }
-        }
+        if (btn == PlayerButton::Jump) m_fields->held = false;
         return PlayerObject::releaseButton(btn);
     }
 
@@ -188,11 +195,20 @@ class $modify(MirbPlayer, PlayerObject) {
         PlayerObject::update(dt);
 
         auto* pl = PlayLayer::get();
-        if (!pl || !mirb::enabled()) return;
+        if (!pl) return;
         if (this == pl->m_player1) mirb::g_tick++;
+
+        // Fin du tap rejoue au tick precedent.
+        if (m_fields->releaseNext) {
+            m_fields->releaseNext = false;
+            if (!m_fields->held) PlayerObject::releaseButton(PlayerButton::Jump);
+        }
+
+        if (!mirb::enabled()) { m_fields->pending = false; return; }
 
         if (!this->modeIsBuffered()) {
             m_fields->pending = false;
+            m_fields->wasCan = false;
             return;
         }
 
@@ -202,8 +218,11 @@ class $modify(MirbPlayer, PlayerObject) {
         if (m_fields->pending) {
             m_fields->waited++;
             if (can) {
+                if (m_fields->held) PlayerObject::releaseButton(PlayerButton::Jump);
                 PlayerObject::pushButton(PlayerButton::Jump);
-                mirb::say("SAVED     click delayed by %d tick(s) (%.2f frame @60fps)", m_fields->waited, m_fields->waited / 4.0);
+                if (!m_fields->held) m_fields->releaseNext = true;
+                mirb::say("SAVED     click delayed by %d tick(s) (%.2f frame @60fps)",
+                          m_fields->waited, m_fields->waited / 4.0);
                 m_fields->pending = false;
                 fired = true;
             } else if (--m_fields->ticksLeft <= 0) {
@@ -223,14 +242,16 @@ class $modify(MirbPlayer, PlayerObject) {
     }
 };
 
-// Mort / restart / checkpoint : le jeu garde l'etat "bouton maintenu" du joueur
-// et le fait sauter tout seul apres la reapparition. On relache le clic des
-// deux joueurs a chaque nouvelle tentative.
+// Mort / restart / checkpoint : on relache le clic des deux joueurs et on oublie
+// tout etat, sinon le joueur "tient" le clic tout seul apres la reapparition.
 class $modify(MirbPlayLayer, PlayLayer) {
     void resetLevel() {
         PlayLayer::resetLevel();
-        if (m_player1) m_player1->releaseButton(PlayerButton::Jump);
-        if (m_player2) m_player2->releaseButton(PlayerButton::Jump);
+        for (auto* p : {m_player1, m_player2}) {
+            if (!p) continue;
+            p->releaseButton(PlayerButton::Jump);
+            static_cast<MirbPlayer*>(p)->clearState();
+        }
         mirb::note("RESET     new attempt, jump released on both players");
     }
 };
