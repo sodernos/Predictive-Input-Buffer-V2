@@ -1,11 +1,13 @@
 {
 	"geode": "5.11.2",
-	"gd": { "win": "2.2081" },
-	"version": "v0.3.0",
+	"gd": {
+		"win": "2.2081"
+	},
+	"version": "v1.0.0",
 	"id": "sodernos.monster-repeat-buffer",
 	"name": "Predictive Input Buffer",
 	"developer": "sodernos",
-	"description": "Input buffer with repeat-on-hold, a hotkey to cycle the window and a live console.",
+	"description": "Predictive input buffer: a ghost simulates your click ahead and delays it if clicking now would kill you. Live console, F4 window key, repeat on orbs while held.",
 	"settings": {
 		"enabled": {
 			"type": "bool",
@@ -14,17 +16,11 @@
 		},
 		"window-ticks": {
 			"type": "int",
-			"name": "Buffer window (ticks)",
-			"description": "How long an early click is remembered. 240 ticks per second: 4 ticks = 1 frame at 60 FPS.",
+			"name": "Max delay (ticks)",
+			"description": "Max delay the buffer may add to a click. 240 ticks per second: 4 ticks = 1 frame at 60 FPS. F4 cycles 1, 2, 4, 8, 16, OFF.",
 			"default": 8,
 			"min": 1,
 			"max": 64
-		},
-		"repeat-held": {
-			"type": "bool",
-			"name": "Repeat while held",
-			"description": "While you hold the click, fire it again on every new chance (landing, new orb).",
-			"default": true
 		},
 		"cycle-key": {
 			"type": "keybind",
@@ -33,10 +29,30 @@
 			"default": "F4",
 			"category": "gameplay"
 		},
+		"repeat-held": {
+			"type": "bool",
+			"name": "Repeat while held",
+			"description": "While you hold the click, touching a new orb clicks again so the orb is used.",
+			"default": true
+		},
+		"smart-prediction": {
+			"type": "bool",
+			"name": "Orb / pad / portal prediction",
+			"description": "Let the ghost use orbs, pads, gravity portals and speed portals. Turn off if you see glitches with objects.",
+			"default": true
+		},
+		"sim-budget-ms": {
+			"type": "float",
+			"name": "Prediction time budget (ms)",
+			"description": "Max time spent predicting per click. Higher finds longer saves but may hitch on dense levels.",
+			"default": 4.0,
+			"min": 1.0,
+			"max": 30.0
+		},
 		"console": {
 			"type": "bool",
 			"name": "Live console",
-			"description": "Opens a console window logging every buffered, fired, expired and repeated click. Needs a restart.",
+			"description": "Opens a console window showing window changes and SAVED clicks (with how many ticks they were delayed). Needs a restart.",
 			"default": true
 		}
 	}
