@@ -108,6 +108,7 @@ namespace {
         int ticksAll = 8;
         int ticksWave = 8;
         bool repeat = true;
+        bool custom = false;  // F4 stage CUSTOM: window comes from "custom-ticks"
 
         std::deque<QueuedInput> queue;
         int shift = 0;  // delay applied to inputs while the queue is active
@@ -161,7 +162,9 @@ namespace {
         buf.budgetMs = mod->getSettingValue<double>("sim-budget-ms");
         buf.repeat = mod->getSettingValue<bool>("repeat-held");
         buf.enabled = mod->getSettingValue<bool>("enabled");
-        buf.window = std::clamp(static_cast<int>(mod->getSettingValue<int64_t>("window-ticks")), 1, 64);
+        buf.custom = mod->getSavedValue<bool>("custom-stage", false);
+        auto key = buf.custom ? "custom-ticks" : "window-ticks";
+        buf.window = std::clamp(static_cast<int>(mod->getSettingValue<int64_t>(key)), 1, 64);
         buf.ticksAll = buf.window;
         buf.ticksWave = buf.window > 8 ? buf.window / 2 : buf.window;
     }
@@ -170,7 +173,8 @@ namespace {
         if (!buf.enabled) {
             return "OFF (no buffering)";
         }
-        return fmt::format("{} tick{} ({:.1f} ms)", buf.window, buf.window > 1 ? "s" : "", buf.window * 1000.0 / 240.0);
+        return fmt::format("{}{} tick{} ({:.1f} ms)", buf.custom ? "CUSTOM " : "", buf.window, buf.window > 1 ? "s" : "",
+            buf.window * 1000.0 / 240.0);
     }
 
     // ------------------------------------------------------------------ ghost
@@ -599,14 +603,19 @@ namespace {
         return true;
     }
 
-    // F4: OFF -> 1 -> 2 -> 4 -> 8 -> 16 -> OFF -> ...
+    // F4: OFF -> 1 -> 2 -> 4 -> 8 -> 16 -> CUSTOM -> OFF -> ...
     void cycleWindow() {
         static int const steps[] = { 1, 2, 4, 8, 16 };
         auto* mod = Mod::get();
         readSettings();
         if (!buf.enabled) {
             mod->setSettingValue<bool>("enabled", true);
+            mod->setSavedValue<bool>("custom-stage", false);
             mod->setSettingValue<int64_t>("window-ticks", steps[0]);
+        }
+        else if (buf.custom) {
+            mod->setSavedValue<bool>("custom-stage", false);
+            mod->setSettingValue<bool>("enabled", false);
         }
         else {
             int next = -1;
@@ -617,7 +626,7 @@ namespace {
                 }
             }
             if (next < 0) {
-                mod->setSettingValue<bool>("enabled", false);
+                mod->setSavedValue<bool>("custom-stage", true);
             }
             else {
                 mod->setSettingValue<int64_t>("window-ticks", next);
@@ -761,14 +770,9 @@ $on_mod(Loaded) {
 
     consoleLine("=== Predictive Input Buffer - Mod made by Sodernos ===");
     consoleLine("");
-    consoleLine("HOW IT WORKS");
-    consoleLine("  Every click, an invisible ghost player tests your click ahead of time.");
-    consoleLine("  If that click would kill you but a slightly later click survives,");
-    consoleLine("  your click is delayed: the console shows SAVED + how many ticks.");
-    consoleLine("  A click on time shows nothing (nothing to save).");
-    consoleLine("");
     consoleLine("KEYS AND SETTINGS");
-    consoleLine("  F4: max delay 1 -> 2 -> 4 -> 8 -> 16 ticks -> OFF -> 1 ...");
+    consoleLine("  F4: max delay 1 -> 2 -> 4 -> 8 -> 16 ticks -> CUSTOM -> OFF -> 1 ...");
+    consoleLine("  CUSTOM uses 'Custom max delay (ticks)' from the mod settings.");
     consoleLine("  Key, orbs, console: Geode > Mods > Predictive Input Buffer > settings.");
     consoleLine("  Hold the click: every new orb you touch gets clicked.");
     consoleLine("  After a death, the click is always released.");
@@ -780,7 +784,7 @@ $on_mod(Loaded) {
     consoleLine(fmt::format("Current max delay: {}", windowText()));
     consoleLine("------------------------------------------------------------------");
     log::info("Mod made by Sodernos");
-    note("loaded v1.1.0, window {}", windowText());
+    note("loaded v1.2.0, window {}", windowText());
 }
 
 // Window key (setting "cycle-key", F4 by default).
