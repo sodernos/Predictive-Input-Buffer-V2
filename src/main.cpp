@@ -110,6 +110,10 @@ namespace {
         bool repeat = true;
         bool custom = false;  // F4 stage CUSTOM: window comes from "custom-ticks"
 
+        int cpsLimit = 0;       // 0 = never pause
+        bool cpsPaused = false;  // clicking faster than cpsLimit: buffer off
+        std::deque<std::chrono::steady_clock::time_point> pressTimes;
+
         std::deque<QueuedInput> queue;
         int shift = 0;  // delay applied to inputs while the queue is active
 
@@ -166,6 +170,7 @@ namespace {
         auto key = buf.custom ? "custom-ticks" : "window-ticks";
         buf.window = std::clamp(static_cast<int>(mod->getSettingValue<int64_t>(key)), 1, 64);
         buf.ticksAll = buf.window;
+        buf.cpsLimit = static_cast<int>(mod->getSettingValue<int64_t>("cps-limit"));
         buf.ticksWave = buf.window > 8 ? buf.window / 2 : buf.window;
     }
 
@@ -175,6 +180,30 @@ namespace {
         }
         return fmt::format("{}{} tick{} ({:.1f} ms)", buf.custom ? "CUSTOM " : "", buf.window, buf.window > 1 ? "s" : "",
             buf.window * 1000.0 / 240.0);
+    }
+
+    // Counts your real presses over the last second. At or above the CPS limit
+    // the buffer steps aside (inputs go straight to the game) until you slow down.
+    bool overCps(bool down) {
+        auto now = std::chrono::steady_clock::now();
+        if (down) {
+            buf.pressTimes.push_back(now);
+        }
+        while (!buf.pressTimes.empty() && now - buf.pressTimes.front() > std::chrono::seconds(1)) {
+            buf.pressTimes.pop_front();
+        }
+        int cps = static_cast<int>(buf.pressTimes.size());
+        bool over = buf.cpsLimit > 0 && cps >= buf.cpsLimit;
+        if (over != buf.cpsPaused) {
+            buf.cpsPaused = over;
+            if (over) {
+                say("CPS       {} cps >= limit {}: buffer paused", cps, buf.cpsLimit);
+            }
+            else {
+                say("CPS       {} cps, under limit {}: buffer back on", cps, buf.cpsLimit);
+            }
+        }
+        return over;
     }
 
     // ------------------------------------------------------------------ ghost
@@ -512,6 +541,7 @@ namespace {
         readSettings();
         buf.isPlayer1 = isPlayer1;
         buf.realInput = down;
+        bool cpsPause = overCps(down);
         if (!buf.enabled) {
             buf.appliedInput = down;
             return false;
@@ -532,6 +562,11 @@ namespace {
             queueInput(std::max(buf.shift, after), down);
             buf.sinceInput = 0;
             return true;
+        }
+
+        if (cpsPause) {
+            buf.appliedInput = down;
+            return false;
         }
 
         bool p1Wave = p1->m_isDart;
@@ -690,7 +725,7 @@ namespace {
         bool ring = !p->m_isDead && repeatMode(p) && touchingRing(p);
         bool rising = ring && !wasRing;
         wasRing = ring;
-        if (!rising || !buf.repeat || !buf.enabled) {
+        if (!rising || !buf.repeat || !buf.enabled || buf.cpsPaused) {
             return;
         }
         if (!buf.realInput || !buf.appliedInput || !buf.queue.empty()) {
@@ -775,6 +810,7 @@ $on_mod(Loaded) {
     consoleLine("  CUSTOM uses 'Custom max delay (ticks)' from the mod settings.");
     consoleLine("  Key, orbs, console: Geode > Mods > Predictive Input Buffer > settings.");
     consoleLine("  Hold the click: every new orb you touch gets clicked.");
+    consoleLine("  CPS limit (settings): buffer pauses while you click at or above it.");
     consoleLine("  After a death, the click is always released.");
     consoleLine("");
     consoleLine("TICKS");
@@ -784,7 +820,7 @@ $on_mod(Loaded) {
     consoleLine(fmt::format("Current max delay: {}", windowText()));
     consoleLine("------------------------------------------------------------------");
     log::info("Mod made by Sodernos");
-    note("loaded v1.2.0, window {}", windowText());
+    note("loaded v1.3.0, window {}", windowText());
 }
 
 // Window key (setting "cycle-key", F4 by default).
