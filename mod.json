@@ -1,11 +1,11 @@
 {
 	"geode": "5.11.2",
 	"gd": { "win": "2.2081" },
-	"version": "v0.1.0",
+	"version": "v0.2.0",
 	"id": "sodernos.monster-repeat-buffer",
 	"name": "Predictive Input Buffer",
 	"developer": "sodernos",
-	"description": "Input buffer with repeat-on-hold and a live console.",
+	"description": "Input buffer with repeat-on-hold, a hotkey to cycle the window and a live console.",
 	"settings": {
 		"enabled": {
 			"type": "bool",
@@ -25,6 +25,13 @@
 			"name": "Repeat while held",
 			"description": "While you hold the click, fire it again on every new chance (landing, new orb).",
 			"default": true
+		},
+		"cycle-key": {
+			"type": "keybind",
+			"name": "Key: cycle window",
+			"description": "In a level, cycles the buffer window: 1, 2, 4, 8, 16 ticks, then OFF, then back to 1.",
+			"default": "F4",
+			"category": "gameplay"
 		},
 		"console": {
 			"type": "bool",
