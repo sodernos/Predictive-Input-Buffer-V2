@@ -13,6 +13,14 @@
 //   va dans le journal Geode (geode/logs).
 //
 // Le moteur de prediction (fantome) reprend celui de Predictive Input Buffer v2.
+//
+// v1.4 (precision) :
+// - le fantome recoit l'etat exact du joueur via les checkpoints de GD
+//   (saveToCheckpoint / loadFromCheckpoint), comme en practice mode ;
+// - un retard n'est accepte que s'il SURVIT entierement (plus de "survit un peu
+//   plus longtemps") et la prediction regarde 2x plus loin ;
+// - la decision est prise au debut d'un tick (meme instant que le clic retarde),
+//   donc plus de decalage avec Click Between Frames.
 
 #include <Geode/Geode.hpp>
 #include <Geode/modify/EffectGameObject.hpp>
@@ -110,6 +118,14 @@ namespace {
         bool repeat = true;
         bool custom = false;  // F4 stage CUSTOM: window comes from "custom-ticks"
 
+        bool exact = true;              // copy the player through GD's checkpoint data
+        PlayerCheckpoint* checkpoint = nullptr;
+        bool decide = false;            // an unsafe input waits for the next tick boundary
+        bool decideDown = false;
+        int decideRelease = -1;
+        int lastSavedTick = -100000;
+        int lastSavedDelay = 0;
+
         int cpsLimit = 0;       // 0 = never pause
         bool cpsPaused = false;  // clicking faster than cpsLimit: buffer off
         std::deque<std::chrono::steady_clock::time_point> pressTimes;
@@ -163,7 +179,8 @@ namespace {
     void readSettings() {
         auto* mod = Mod::get();
         buf.smart = mod->getSettingValue<bool>("smart-prediction");
-        buf.budgetMs = mod->getSettingValue<double>("sim-budget-ms");
+        buf.budgetMs = mod->getSettingValue<double>("sim-budget");
+        buf.exact = mod->getSettingValue<bool>("exact-ghost");
         buf.repeat = mod->getSettingValue<bool>("repeat-held");
         buf.enabled = mod->getSettingValue<bool>("enabled");
         buf.custom = mod->getSavedValue<bool>("custom-stage", false);
@@ -215,6 +232,7 @@ namespace {
     void resetPending() {
         buf.queue.clear();
         buf.shift = 0;
+        buf.decide = false;
     }
 
     void dropGhosts() {
@@ -230,6 +248,11 @@ namespace {
             buf.ghostLayer->release();
             buf.ghostLayer = nullptr;
         }
+        if (buf.checkpoint) {
+            buf.checkpoint->release();
+            buf.checkpoint = nullptr;
+        }
+        buf.decide = false;
         buf.simulating = false;
         buf.injecting = false;
         buf.rapid = 0;
@@ -271,6 +294,16 @@ namespace {
         ghost->setVisible(false);
         ghost->resetTouchedRings(true);
         ghost->copyAttributes(real);
+        // GD's own practice-mode snapshot: position, velocity, slopes, dash, last
+        // collisions, snapped objects... exactly what GD needs to resume the player.
+        if (buf.exact) {
+            if (!buf.checkpoint) {
+                buf.checkpoint = PlayerCheckpoint::create();
+                buf.checkpoint->retain();
+            }
+            real->saveToCheckpoint(buf.checkpoint);
+            ghost->loadFromCheckpoint(buf.checkpoint);
+        }
         ghost->setScale(real->getScale());
         ghost->setContentSize(real->getContentSize());
         ghost->m_width = real->m_width;
@@ -483,7 +516,15 @@ namespace {
         return safe ? horizon : survived;
     }
 
-    // Find the smallest delay that clearly beats pressing now. 0 = don't buffer.
+    // How far ahead to predict (ticks). Twice as far as before: a click that is
+    // only "safe for 0.2 s" was accepted even if it died just after.
+    int horizonFor(PlayerObject* p1, PlayerObject* p2) {
+        bool flying = isFlying(p1) || (p2 && isFlying(p2));
+        bool miniWave = (p1->m_isDart && p1->m_vehicleSize < 1.f) || (p2 && p2->m_isDart && p2->m_vehicleSize < 1.f);
+        return miniWave ? 48 : (flying ? 72 : 96);
+    }
+
+    // Find the smallest delay that fully survives. 0 = don't buffer.
     int searchDelay(PlayLayer* layer, PlayerObject* p1, PlayerObject* p2, bool dual, bool down, bool anyWave, int horizon, int maxDelay,
         int releaseAfter, int base, int* landed) {
         using clock = std::chrono::steady_clock;
@@ -492,23 +533,17 @@ namespace {
             return std::chrono::duration<double, std::milli>(clock::now() - start).count() > buf.budgetMs;
         };
 
-        int target = anyWave ? base + 10 : std::min(horizon, base + 12);
-        int gain = 6;
+        // Only a delay that survives the WHOLE prediction counts. "Survives a bit
+        // longer" used to be accepted too, which is how a SAVED click could still die.
+        (void)anyWave;
+        (void)base;
         for (int k = 1; k <= maxDelay; ++k) {
             SimEnd end;
-            int ret = simulate(layer, p1, p2, dual, k, down, horizon, releaseAfter, std::min(target, horizon), &end);
+            int ret = simulate(layer, p1, p2, dual, k, down, horizon, releaseAfter, horizon, &end);
             if (end == SimEnd::StopSearch) {
                 return 0;
             }
-            bool good;
-            if (anyWave) {
-                good = ret < horizon ? ret >= target : (ret - base >= gain || ret >= target);
-                target += 2;
-                gain += 2;
-            }
-            else {
-                good = ret >= target;
-            }
+            bool good = ret >= horizon;
             if (good) {
                 *landed = ret;
                 return k;
@@ -571,7 +606,6 @@ namespace {
 
         bool p1Wave = p1->m_isDart;
         bool anyWave = p1Wave || (p2 && p2->m_isDart);
-        bool mini = (p1Wave && p1->m_vehicleSize < 1.f) || (p2 && p2->m_isDart && p2->m_vehicleSize < 1.f);
 
         // Wave spam: don't fight fast inputs.
         if (buf.sinceInput < 8) {
@@ -603,7 +637,7 @@ namespace {
             }
         }
 
-        int horizon = mini ? 28 : (anyWave ? 38 : 48);
+        int horizon = horizonFor(p1, p2);
         int maxDelay = anyWave ? buf.ticksWave : buf.ticksAll;
         if (maxDelay <= 0) {
             buf.appliedInput = down;
@@ -615,6 +649,8 @@ namespace {
         bool anyRobot = p1->m_isRobot || (p2 && p2->m_isRobot);
         int releaseAfter = (down && !anyWave && !anyRobot) ? holdEstimate() : -1;
 
+        // Quick check right now: safe -> the click goes through untouched (keeps
+        // Click Between Frames' sub-tick timing).
         SimEnd end;
         int base = simulate(layer, p1, p2, dual, 0, down, horizon, releaseAfter, horizon, &end);
         if (base >= horizon) {
@@ -623,19 +659,51 @@ namespace {
             return false;
         }
 
+        // Unsafe: hold the input until the start of the next tick and decide there.
+        // Delayed inputs are always replayed at the start of a tick, so deciding
+        // from that exact state makes the prediction match what really happens.
+        buf.decide = true;
+        buf.decideDown = down;
+        buf.decideRelease = releaseAfter;
+        queueInput(0, down);
+        return true;
+    }
+
+    // Runs at the start of a tick, before physics, for an input held by intercept().
+    void decideNow(PlayLayer* layer, PlayerObject* p1) {
+        buf.decide = false;
+        bool dual = layer->m_gameState.m_isDualMode && layer->m_player2;
+        auto* p2 = dual ? layer->m_player2 : nullptr;
+        bool down = buf.decideDown;
+        if (!p1 || p1->m_isDead) {
+            return;  // fires as is
+        }
+        bool anyWave = p1->m_isDart || (p2 && p2->m_isDart);
+        int horizon = horizonFor(p1, p2);
+        int maxDelay = anyWave ? buf.ticksWave : buf.ticksAll;
+
+        SimEnd end;
+        int base = simulate(layer, p1, p2, dual, 0, down, horizon, buf.decideRelease, horizon, &end);
+        if (base >= horizon) {
+            note("{} safe at tick start (no delay needed)", down ? "click" : "release");
+            return;  // fires this tick
+        }
+
         int landed = 0;
-        int saved = searchDelay(layer, p1, p2, dual, down, anyWave, horizon, maxDelay, releaseAfter, base, &landed);
+        int saved = searchDelay(layer, p1, p2, dual, down, anyWave, horizon, maxDelay, buf.decideRelease, base, &landed);
         if (saved <= 0) {
             note("{} now dies in {} ticks, no delay up to {} survives", down ? "click" : "release", base, maxDelay);
-            buf.appliedInput = down;
-            return false;
+            return;  // fires this tick
         }
 
         say("SAVED     {} delayed by {} tick{} ({:.1f} ms)", down ? "click" : "release", saved, saved > 1 ? "s" : "",
             saved * 1000.0 / 240.0);
+        for (auto& q : buf.queue) {
+            q.ticksLeft += saved;
+        }
         buf.shift = saved;
-        queueInput(saved, down);
-        return true;
+        buf.lastSavedTick = tickCount + saved;
+        buf.lastSavedDelay = saved;
     }
 
     // F4: OFF -> 1 -> 2 -> 4 -> 8 -> 16 -> CUSTOM -> OFF -> ...
@@ -687,10 +755,15 @@ namespace {
         }
 
         if (buf.queue.empty()) {
+            buf.decide = false;
             if (buf.appliedInput != buf.realInput) {
                 sendButton(layer, buf.realInput);
             }
             return;
+        }
+
+        if (buf.decide) {
+            decideNow(layer, player);
         }
 
         // An input queued with N ticks fires right before physics step N,
@@ -820,7 +893,7 @@ $on_mod(Loaded) {
     consoleLine(fmt::format("Current max delay: {}", windowText()));
     consoleLine("------------------------------------------------------------------");
     log::info("Mod made by Sodernos");
-    note("loaded v1.3.0, window {}", windowText());
+    note("loaded v1.4.0, window {}", windowText());
 }
 
 // Window key (setting "cycle-key", F4 by default).
@@ -842,6 +915,9 @@ class $modify(BufPlayLayer, PlayLayer) {
         if (buf.simulating && isGhost(player)) {
             buf.ghostDied = true;
             return;
+        }
+        if ((player == m_player1 || player == m_player2) && tickCount - buf.lastSavedTick < 240 && tickCount >= buf.lastSavedTick) {
+            note("DIED      {} ticks after a SAVED click (delayed {} ticks)", tickCount - buf.lastSavedTick, buf.lastSavedDelay);
         }
         // The attempt is over: drop delayed inputs. The click state itself is
         // cleared on the next reset (see releaseAfterReset).
