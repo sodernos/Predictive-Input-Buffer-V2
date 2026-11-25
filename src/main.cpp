@@ -179,8 +179,8 @@ namespace {
     void readSettings() {
         auto* mod = Mod::get();
         buf.smart = mod->getSettingValue<bool>("smart-prediction");
-        buf.budgetMs = mod->getSettingValue<double>("sim-budget");
-        buf.exact = mod->getSettingValue<bool>("exact-ghost");
+        buf.budgetMs = mod->getSettingValue<double>("budget-ms");
+        buf.exact = mod->getSettingValue<bool>("checkpoint-copy");
         buf.repeat = mod->getSettingValue<bool>("repeat-held");
         buf.enabled = mod->getSettingValue<bool>("enabled");
         buf.custom = mod->getSavedValue<bool>("custom-stage", false);
@@ -521,7 +521,7 @@ namespace {
     int horizonFor(PlayerObject* p1, PlayerObject* p2) {
         bool flying = isFlying(p1) || (p2 && isFlying(p2));
         bool miniWave = (p1->m_isDart && p1->m_vehicleSize < 1.f) || (p2 && p2->m_isDart && p2->m_vehicleSize < 1.f);
-        return miniWave ? 48 : (flying ? 72 : 96);
+        return miniWave ? 40 : (flying ? 56 : 64);
     }
 
     // Find the smallest delay that fully survives. 0 = don't buffer.
@@ -535,15 +535,15 @@ namespace {
 
         // Only a delay that survives the WHOLE prediction counts. "Survives a bit
         // longer" used to be accepted too, which is how a SAVED click could still die.
-        (void)anyWave;
-        (void)base;
         for (int k = 1; k <= maxDelay; ++k) {
             SimEnd end;
             int ret = simulate(layer, p1, p2, dual, k, down, horizon, releaseAfter, horizon, &end);
             if (end == SimEnd::StopSearch) {
                 return 0;
             }
-            bool good = ret >= horizon;
+            // Survives the whole prediction, or clearly gets past the obstacle that
+            // killed the click-now run (a "bit longer" used to count, and then died).
+            bool good = ret >= horizon || ret >= base + (anyWave ? 16 : 24);
             if (good) {
                 *landed = ret;
                 return k;
@@ -893,7 +893,7 @@ $on_mod(Loaded) {
     consoleLine(fmt::format("Current max delay: {}", windowText()));
     consoleLine("------------------------------------------------------------------");
     log::info("Mod made by Sodernos");
-    note("loaded v1.4.0, window {}", windowText());
+    note("loaded v1.4.1, window {}", windowText());
 }
 
 // Window key (setting "cycle-key", F4 by default).
