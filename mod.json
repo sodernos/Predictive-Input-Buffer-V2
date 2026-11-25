@@ -3,7 +3,7 @@
 	"gd": {
 		"win": "2.2081"
 	},
-	"version": "v1.4.0",
+	"version": "v1.4.1",
 	"id": "sodernos.monster-repeat-buffer",
 	"name": "Predictive Input Buffer",
 	"developer": "sodernos",
@@ -57,19 +57,19 @@
 			"description": "Let the ghost use orbs, pads, gravity portals and speed portals. Turn off if you see glitches with objects.",
 			"default": true
 		},
-		"sim-budget": {
+		"budget-ms": {
 			"type": "float",
 			"name": "Prediction time budget (ms)",
-			"description": "Max time spent predicting per click. Higher finds more saves on dense levels but may hitch.",
-			"default": 8.0,
+			"description": "Max time spent predicting per click. Keep it low at high FPS (240 fps = 4.2 ms per frame) or the game stutters.",
+			"default": 3.0,
 			"min": 1.0,
 			"max": 30.0
 		},
-		"exact-ghost": {
+		"checkpoint-copy": {
 			"type": "bool",
-			"name": "Exact ghost state",
-			"description": "Copies your player into the ghost with GD's own checkpoint data (most accurate). Turn off only if the game crashes.",
-			"default": true
+			"name": "Checkpoint ghost copy (experimental)",
+			"description": "Copies your player into the ghost with GD checkpoint data. Experimental: broke predictions in testing, leave it off.",
+			"default": false
 		},
 		"console": {
 			"type": "bool",
